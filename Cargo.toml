@@ -1,0 +1,12 @@
+[package]
+name = "pgcli-rs"
+version = "0.1.0"
+authors = ["Jakub Wieczorek <jakub.adam.wieczorek@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+linefeed = "*"
+matches = "*"
+postgres = "0.16.0-rc.2"
+prettytable-rs = "*"
+sqlparser = "*"
