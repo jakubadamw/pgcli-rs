@@ -57,22 +57,22 @@ impl<Term: Terminal> Completer<Term> for SQLCompleter {
         let mut tokenizer = Tokenizer::new(&Self::DIALECT, &line[..end]);
 
         match tokenizer.tokenize() {
-        Ok(ref rows) if matches!(rows.last(), Some(Token::Word(_))) => {
-            let tokens = tokens_without_whitespaces(rows.as_slice());
-                for completion in self.completions.iter() {
-                    let mut connection = self.connection.lock().unwrap();
-                    let completion = completion.lock().unwrap();
-                let rows = completion.complete(&mut connection, &tokens);
-                if let Ok(words) = rows {
-                        return Some(words
-                            .into_iter()
-                            .map(|word| Completion::simple(word.to_owned()))
-                            .collect());
+            Ok(ref rows) if matches!(rows.last(), Some(Token::Word(_))) => {
+                let tokens = tokens_without_whitespaces(rows.as_slice());
+                    for completion in self.completions.iter() {
+                        let mut connection = self.connection.lock().unwrap();
+                        let completion = completion.lock().unwrap();
+                    let rows = completion.complete(&mut connection, &tokens);
+                    if let Ok(words) = rows {
+                            return Some(words
+                                .into_iter()
+                                .map(|word| Completion::simple(word.to_owned()))
+                                .collect());
+                        }
                     }
-                }
-                None
-            },
-        Ok(_) | Err(_) => None
+                    None
+                },
+            Ok(_) | Err(_) => None
         }
     }
 }

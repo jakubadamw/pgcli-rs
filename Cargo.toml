@@ -7,6 +7,6 @@ edition = "2018"
 [dependencies]
 linefeed = "*"
 matches = "*"
-postgres = "0.16.0-rc.2"
+postgres = { git = "https://github.com/sfackler/rust-postgres.git" }
 prettytable-rs = "*"
 sqlparser = "*"
