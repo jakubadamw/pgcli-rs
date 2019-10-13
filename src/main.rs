@@ -15,20 +15,20 @@ const HISTORY_FILE: &str = ".pgcli.rs.hst";
 
 #[derive(Debug)]
 enum Error {
-    IOError(std::io::Error),
-    PostgresError(postgres::Error),
+    Io(std::io::Error),
+    Postgres(postgres::Error),
     CommandUnknown
 }
 
 impl std::convert::From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
-        Error::IOError(error)
+        Self::Io(error)
     }
 }
 
 impl std::convert::From<postgres::Error> for Error {
     fn from(error: postgres::Error) -> Self {
-        Error::PostgresError(error)
+        Self::Postgres(error)
     }
 }
 
@@ -40,8 +40,8 @@ struct SQLCompleter {
 impl SQLCompleter {
     const DIALECT: GenericDialect = GenericDialect {};
 
-    fn new(connection: postgres::Client) -> SQLCompleter {
-        SQLCompleter {
+    fn new(connection: postgres::Client) -> Self {
+        Self {
             connection: Arc::new(Mutex::new(connection)),
             completions: vec![Arc::new(Mutex::new(Box::new(TableNameCompletion)))]
         }
@@ -59,14 +59,14 @@ impl<Term: Terminal> Completer<Term> for SQLCompleter {
         match tokenizer.tokenize() {
             Ok(ref rows) if matches!(rows.last(), Some(Token::Word(_))) => {
                 let tokens = tokens_without_whitespaces(rows.as_slice());
-                    for completion in self.completions.iter() {
+                    for completion in &self.completions {
                         let mut connection = self.connection.lock().unwrap();
                         let completion = completion.lock().unwrap();
                     let rows = completion.complete(&mut connection, &tokens);
                     if let Ok(words) = rows {
                             return Some(words
                                 .into_iter()
-                                .map(|word| Completion::simple(word.to_owned()))
+                                .map(Completion::simple)
                                 .collect());
                         }
                     }
@@ -142,7 +142,7 @@ impl WordCompletion for TableNameCompletion {
     }
 }
 
-const CONNECTION_OPTIONS: &'static str
+const CONNECTION_OPTIONS: &str
     = "host=/var/run/postgresql port=5432 user=postgres password=postgres";
 
 fn connect() -> Result<postgres::Client, postgres::Error> {
@@ -154,9 +154,9 @@ struct PrettyPrinter {
 }
 
 impl PrettyPrinter {
-    fn from_columns(columns: &[postgres::Column]) -> PrettyPrinter {
-        PrettyPrinter {
-            types: columns.iter().map(|col| col.type_()).cloned().collect()
+    fn from_columns(columns: &[postgres::Column]) -> Self {
+        Self {
+            types: columns.iter().map(postgres::Column::type_).cloned().collect()
         }
     }
 
@@ -169,7 +169,7 @@ impl PrettyPrinter {
                 Type::BOOL =>
                     row.try_get::<_, bool>(idx).map(|v| v.to_string()),
                 Type::VARCHAR | Type::TEXT | Type::BPCHAR | Type::NAME | Type::UNKNOWN
-                    => row.try_get::<_, String>(idx).map(|v| v.to_string()),
+                    => row.try_get::<_, String>(idx).map(|v| v),
                 Type::INT4 =>
                     row.try_get::<_, i32>(idx).map(|v| v.to_string()),
                 Type::INT8 =>
@@ -228,6 +228,7 @@ fn pretty_print_result(rows: Vec<postgres::Row>) -> Result<(), Error> {
     Ok(())
 }
 
+#[allow(clippy::find_map)]
 fn main() -> Result<(), Error> {
     std::fs::OpenOptions::new()
         .write(true)
@@ -257,8 +258,8 @@ fn main() -> Result<(), Error> {
                 if query.is_empty() { continue; }
                 interface.add_history_unique(line.clone());
 
-                if query.starts_with("\\") {
-                    let (name, args) = match query.find(|ch: char| ch.is_whitespace()) {
+                if query.starts_with('\\') {
+                    let (name, args) = match query.find(char::is_whitespace) {
                         Some(pos) => (&query[1..pos], query[pos..].trim_start()),
                         None => (&query[1..], "")
                     };
