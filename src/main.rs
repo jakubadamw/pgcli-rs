@@ -1,10 +1,11 @@
 #![feature(slice_patterns, type_ascription)]
 
-#[macro_use] extern crate matches;
+#[macro_use]
+extern crate matches;
 
-use linefeed::{Interface, Prompter, ReadResult, Signal};
 use linefeed::complete::{Completer, Completion};
 use linefeed::terminal::Terminal;
+use linefeed::{Interface, Prompter, ReadResult, Signal};
 
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::{Token, Tokenizer, Word};
@@ -17,7 +18,7 @@ const HISTORY_FILE: &str = ".pgcli.rs.hst";
 enum Error {
     Io(std::io::Error),
     Postgres(postgres::Error),
-    CommandUnknown
+    CommandUnknown,
 }
 
 impl std::convert::From<std::io::Error> for Error {
@@ -34,7 +35,7 @@ impl std::convert::From<postgres::Error> for Error {
 
 struct SQLCompleter {
     connection: Arc<Mutex<postgres::Client>>,
-    completions: Vec<Arc<Mutex<Box<dyn WordCompletion>>>>
+    completions: Vec<Arc<Mutex<Box<dyn WordCompletion>>>>,
 }
 
 impl SQLCompleter {
@@ -43,36 +44,36 @@ impl SQLCompleter {
     fn new(connection: postgres::Client) -> Self {
         Self {
             connection: Arc::new(Mutex::new(connection)),
-            completions: vec![Arc::new(Mutex::new(Box::new(TableNameCompletion)))]
+            completions: vec![Arc::new(Mutex::new(Box::new(TableNameCompletion)))],
         }
     }
 }
 
 impl<Term: Terminal> Completer<Term> for SQLCompleter {
-    fn complete(&self,
-        _word: &str, prompter: &Prompter<Term>,
-        _start: usize, end: usize)
-    -> Option<Vec<Completion>> {
+    fn complete(
+        &self,
+        _word: &str,
+        prompter: &Prompter<Term>,
+        _start: usize,
+        end: usize,
+    ) -> Option<Vec<Completion>> {
         let line = prompter.buffer();
         let mut tokenizer = Tokenizer::new(&Self::DIALECT, &line[..end]);
 
         match tokenizer.tokenize() {
             Ok(ref rows) if matches!(rows.last(), Some(Token::Word(_))) => {
                 let tokens = tokens_without_whitespaces(rows.as_slice());
-                    for completion in &self.completions {
-                        let mut connection = self.connection.lock().unwrap();
-                        let completion = completion.lock().unwrap();
+                for completion in &self.completions {
+                    let mut connection = self.connection.lock().unwrap();
+                    let completion = completion.lock().unwrap();
                     let rows = completion.complete(&mut connection, &tokens);
                     if let Ok(words) = rows {
-                            return Some(words
-                                .into_iter()
-                                .map(Completion::simple)
-                                .collect());
-                        }
+                        return Some(words.into_iter().map(Completion::simple).collect());
                     }
-                    None
-                },
-            Ok(_) | Err(_) => None
+                }
+                None
+            }
+            Ok(_) | Err(_) => None,
         }
     }
 }
@@ -93,13 +94,14 @@ trait SpecialQueryCommand: Send {
 struct ListTablesCommand;
 impl ListTablesCommand {
     const LIST_TABLES_QUERY: &'static str = "\
-        SELECT schemaname AS Schema, tablename AS Name, tableowner AS Type, tablespace AS Owner FROM pg_catalog.pg_tables \
-        WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'";
+                                             SELECT schemaname AS Schema, tablename AS Name, tableowner AS Type, tablespace AS Owner FROM pg_catalog.pg_tables \
+                                             WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'";
 }
 impl SpecialQueryCommand for ListTablesCommand {
     fn result_title(&self) -> &'static str {
         "Table list"
     }
+
     fn prepare_query(&self, args: &str) -> Result<String, Error> {
         assert!(args.is_empty());
         Ok(Self::LIST_TABLES_QUERY.to_owned())
@@ -108,55 +110,66 @@ impl SpecialQueryCommand for ListTablesCommand {
 
 trait WordCompletion: Send {
     fn complete(&self, conn: &mut postgres::Client, tokens: &[Token])
-        -> Result<Vec<String>, Error>;
+    -> Result<Vec<String>, Error>;
 }
 
 struct TableNameCompletion;
 impl TableNameCompletion {
     const LIST_TABLES_QUERY: &'static str = "\
-        SELECT tablename FROM pg_catalog.pg_tables \
-        WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'";
+                                             SELECT tablename FROM pg_catalog.pg_tables \
+                                             WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'";
 
     fn table_names(&self, connection: &mut postgres::Client) -> Result<Vec<String>, Error> {
-        Ok(connection.query(Self::LIST_TABLES_QUERY, &[])?
+        Ok(connection
+            .query(Self::LIST_TABLES_QUERY, &[])?
             .into_iter()
             .map(|row| row.get("tablename"))
             .collect())
     }
 }
 impl WordCompletion for TableNameCompletion {
-    fn complete(&self, conn: &mut postgres::Client, tokens: &[Token]) -> Result<Vec<String>, Error> {
+    fn complete(
+        &self,
+        conn: &mut postgres::Client,
+        tokens: &[Token],
+    ) -> Result<Vec<String>, Error> {
         match tokens {
-            [..,
-             Token::Word(Word { keyword: keyword_before, .. }),
-             Token::Word(Word { keyword, value, .. })]
-                if keyword_before == "FROM" && keyword == "" => {
+            [.., Token::Word(Word {
+                keyword: keyword_before,
+                ..
+            }), Token::Word(Word { keyword, value, .. })]
+                if keyword_before == "FROM" && keyword == "" =>
+            {
                 Ok(self
                     .table_names(conn)?
                     .into_iter()
                     .filter(|name| name.starts_with(value))
                     .collect())
-             }
-             _ => Ok(vec![])
+            }
+            _ => Ok(vec![]),
         }
     }
 }
 
-const CONNECTION_OPTIONS: &str
-    = "host=/var/run/postgresql port=5432 user=postgres password=postgres";
+const CONNECTION_OPTIONS: &str =
+    "host=/var/run/postgresql port=5432 user=postgres password=postgres";
 
 fn connect() -> Result<postgres::Client, postgres::Error> {
     postgres::Client::connect(CONNECTION_OPTIONS, postgres::NoTls)
 }
 
 struct PrettyPrinter {
-    types: Vec<postgres::types::Type>
+    types: Vec<postgres::types::Type>,
 }
 
 impl PrettyPrinter {
     fn from_columns(columns: &[postgres::Column]) -> Self {
         Self {
-            types: columns.iter().map(postgres::Column::type_).cloned().collect()
+            types: columns
+                .iter()
+                .map(postgres::Column::type_)
+                .cloned()
+                .collect(),
         }
     }
 
@@ -164,35 +177,35 @@ impl PrettyPrinter {
         use postgres::types::Type;
         use std::error::Error as StdError;
 
-        (0..row.len()).map(|idx| {
-            match self.types[idx] {
-                Type::BOOL =>
-                    row.try_get::<_, bool>(idx).map(|v| v.to_string()),
-                Type::VARCHAR | Type::TEXT | Type::BPCHAR | Type::NAME | Type::UNKNOWN
-                    => row.try_get::<_, String>(idx).map(|v| v),
-                Type::INT4 =>
-                    row.try_get::<_, i32>(idx).map(|v| v.to_string()),
-                Type::INT8 =>
-                    row.try_get::<_, i64>(idx).map(|v| v.to_string()),
-                _ =>
-                    Ok("[unrepresentable]".to_string())
-            }
-        }).map(|value| {
-            match value {
-                Err(err) => match err.source() {
-                    Some(ref source) if source.is::<postgres::types::WasNull>() =>
-                        Ok("NULL".to_string()),
-                    _ => Err(err)
+        (0..row.len())
+            .map(|idx| match self.types[idx] {
+                Type::BOOL => row.try_get::<_, bool>(idx).map(|v| v.to_string()),
+                Type::VARCHAR | Type::TEXT | Type::BPCHAR | Type::NAME | Type::UNKNOWN => {
+                    row.try_get::<_, String>(idx).map(|v| v)
                 }
-                value => value
-            }.map_err(|err| err.into(): Error)
-        }).collect()
+                Type::INT4 => row.try_get::<_, i32>(idx).map(|v| v.to_string()),
+                Type::INT8 => row.try_get::<_, i64>(idx).map(|v| v.to_string()),
+                _ => Ok("[unrepresentable]".to_string()),
+            })
+            .map(|value| {
+                match value {
+                    Err(err) => match err.source() {
+                        Some(ref source) if source.is::<postgres::types::WasNull>() => {
+                            Ok("NULL".to_string())
+                        }
+                        _ => Err(err),
+                    },
+                    value => value,
+                }
+                .map_err(|err| err.into(): Error)
+            })
+            .collect()
     }
 }
 
 fn pretty_print_result(rows: Vec<postgres::Row>) -> Result<(), Error> {
-    use prettytable::{Table, Row, Cell};
     use prettytable::format;
+    use prettytable::{Cell, Row, Table};
 
     let row_count = rows.len();
 
@@ -206,16 +219,17 @@ fn pretty_print_result(rows: Vec<postgres::Row>) -> Result<(), Error> {
                 .columns()
                 .iter()
                 .map(|c| Cell::new(c.name()))
-                .collect()
+                .collect(),
         ));
 
         let pretty_printer = PrettyPrinter::from_columns(first_row.columns());
         for row in rows {
             table.add_row(Row::new(
-                pretty_printer.pretty_print(&row)?
+                pretty_printer
+                    .pretty_print(&row)?
                     .into_iter()
                     .map(|value| Cell::new(&value))
-                    .collect()
+                    .collect(),
             ));
         }
 
@@ -246,22 +260,23 @@ fn main() -> Result<(), Error> {
     interface.set_completer(Arc::new(SQLCompleter::new(connect()?)));
     interface.set_prompt("postgres> ")?;
 
-    let special_commands: Vec<(&'static str, Box<dyn SpecialQueryCommand>)> = vec![
-        ("dt", Box::new(ListTablesCommand))
-    ];
+    let special_commands: Vec<(&'static str, Box<dyn SpecialQueryCommand>)> =
+        vec![("dt", Box::new(ListTablesCommand))];
 
     loop {
         let res = interface.read_line()?;
         match res {
             ReadResult::Input(line) => {
                 let mut query = line.trim().to_owned();
-                if query.is_empty() { continue; }
+                if query.is_empty() {
+                    continue;
+                }
                 interface.add_history_unique(line.clone());
 
                 if query.starts_with('\\') {
                     let (name, args) = match query.find(char::is_whitespace) {
                         Some(pos) => (&query[1..pos], query[pos..].trim_start()),
-                        None => (&query[1..], "")
+                        None => (&query[1..], ""),
                     };
 
                     let command = special_commands
@@ -291,7 +306,7 @@ fn main() -> Result<(), Error> {
                 break;
             }
 
-            ReadResult::Signal(_) => unreachable!()
+            ReadResult::Signal(_) => unreachable!(),
         }
     }
 
